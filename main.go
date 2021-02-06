@@ -5,11 +5,12 @@ import (
 	"go/parser"
 	"go/token"
 	"go/ast"
+	"io/ioutil"
+	"os"
 )
 
 func main() {
 	fset := token.NewFileSet() // positions are relative to fset
-
 	src := `package foo
 
 import (
@@ -28,8 +29,15 @@ func bbar() {
 	fmt.Println(time.Now())
 }`
 
+	src = src
+	file, err := ioutil.ReadFile(os.Args[2])
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(file))
 	// Parse src but stop after processing the imports.
-	f, err := parser.ParseFile(fset, "", src, parser.DeclarationErrors)
+	f, err := parser.ParseFile(fset, "", string(file), parser.DeclarationErrors)
+
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -41,7 +49,7 @@ func bbar() {
 
 	tl := []*ast.TypeSpec{}
 	for _, s := range f.Imports {
-		if s.Path.Value == targetImport {
+		if s.Path.Value == targetIm {
 			t := Thinger{}
 			if s.Name != nil {
 				t.ImportName = s.Name.Name
@@ -57,7 +65,7 @@ func bbar() {
 		switch t.Type.(type) {
 		case *ast.StructType:
 			fmt.Printf("Struct: %s\n", t.Name.Name)
-			if objectMetaEmbedFilter(t.Type, "bar") {
+			if objectMetaEmbedFilter(t.Type, "ObjectMeta") {
 				wrappables[t.Name.Name] = t.Type
 			}
 		}
@@ -128,5 +136,5 @@ type Thinger struct {
 	ImportName string
 	Types []ast.Decl
 }
-
+const targetIm = "\"k8s.io/apimachinery/pkg/apis/meta/v1\""
 const targetImport = "\"fmt\""
