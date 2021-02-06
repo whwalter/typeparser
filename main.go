@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"go/ast"
@@ -9,72 +10,34 @@ import (
 	"os"
 	"strings"
 	"text/template"
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
 
-	fset := token.NewFileSet() // positions are relative to fset
-
-	file, err := ioutil.ReadFile(os.Args[2])
-	if err != nil {
-		panic(err)
-	}
-	// Parse src but stop after processing the imports.
-	f, err := parser.ParseFile(fset, "", string(file), parser.DeclarationErrors)
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	// get the list of input packages
+	pkgInfo := parseInput(os.Args[2:]...)
 
 
-	tl := []*ast.TypeSpec{}
-	for _, s := range f.Imports {
-		if s.Path.Value == targetIm {
-			tl = extractTypes(f.Decls)
+	templateMap := map[string][]TypeSpec{}
+	//Parse the source files for each package
+	for _, pkg := range pkgInfo {
+		wrapables, err := parsePkg(pkg)
+		if err != nil {
+			panic(err)
 		}
+
+		templateMap[pkg.ImportPath] = wrapables
+	}
+	for pkg, ts := range templateMap {
+
+		fmt.Printf("Package: %s\nTemplated types: %s\n", pkg, ts)
+		templatePkg(pkg, ts)
 	}
 
-	wrappables := map[string]ast.Node{}
-	wrap := []w{}
-	for _, t := range tl {
-		switch t.Type.(type) {
-		case *ast.StructType:
-			fmt.Printf("Struct: %s\n", t.Name.Name)
-			if objectMetaEmbedFilter(t.Type, "ObjectMeta") {
-				wrappables[t.Name.Name] = t.Type
-				wrap = append(wrap, w{ Name: t.Name.Name, Pkg: f.Name.Name})
-			}
-		}
-	}
-
-	fm := template.FuncMap{
-		"ToLower": strings.ToLower,
-	}
-	tFile, err := ioutil.ReadFile("./templates/object_wrapper.tmpl")
-	if err != nil {
-		panic(err)
-	}
-
-	temp, err := template.New("thing").Funcs(fm).Parse(string(tFile))
-	if err != nil {
-		panic(err)
-	}
-
-	oFile, err := os.OpenFile("./output.go", os.O_RDWR|os.O_CREATE, 0755)
-	if err != nil {
-		panic(err)
-	}
-	defer oFile.Close()
-
-	err = temp.Execute(oFile, wrap)
-	for k := range wrappables {
-		fmt.Printf("Templateable Type %s\n", k)
-
-	}
 }
 
-type w struct {
+type TypeSpec struct {
 	Name string
 	Pkg string
 }
@@ -92,19 +55,6 @@ func extractTypes(decls []ast.Decl) []*ast.TypeSpec {
 		}
 	}
 	return tl
-}
-
-
-func runtimeObjectFilter(n ast.Node) bool {
-	_, ok := n.(*ast.GenDecl)
-	if ok { fmt.Println("castable")}
-	switch n.(type) {
-	case *ast.StructType:
-//		return objectMetaEmbedFilter(n)
-	default:
-		fmt.Println(n)
-	}
-	return false
 }
 
 func objectMetaEmbedFilter(n ast.Node, embedName string) bool {
@@ -125,3 +75,92 @@ func objectMetaEmbedFilter(n ast.Node, embedName string) bool {
 
 const targetIm = "\"k8s.io/apimachinery/pkg/apis/meta/v1\""
 const targetImport = "\"fmt\""
+
+func parseInput(inputs ...string) map[string]*build.Package {
+	ctx := build.Default
+	importPaths := map[string]*build.Package{}
+	for _, input := range inputs {
+		pkg, err := ctx.Import(input, ".", build.ImportComment)
+		if err != nil {
+			log.Errorf("Failure for %s\nerr\ntry go get %s first.\n", input, err.Error(), input)
+		}
+		importPaths[input] = pkg
+	}
+	return importPaths
+}
+
+func parsePkg(input *build.Package) ([]TypeSpec, error) {
+
+	wrapables := []TypeSpec{}
+	for _, source := range input.GoFiles {
+		wraps, err := parseFile(fmt.Sprintf("%s%s%s", input.Dir, string(os.PathSeparator), source))
+		if err != nil {
+			return nil, err
+		}
+		wrapables = append(wrapables, wraps...)
+	}
+	return wrapables, nil
+}
+
+func parseFile(input string) ([]TypeSpec, error) {
+
+	fset := token.NewFileSet() // positions are relative to fset
+	file, err := ioutil.ReadFile(input)
+	if err != nil {
+		return nil, err
+	}
+	// Parse src but stop after processing the imports.
+	f, err := parser.ParseFile(fset, "", string(file), parser.DeclarationErrors)
+	if err != nil {
+		return nil, err
+	}
+
+
+	tl := []*ast.TypeSpec{}
+	for _, s := range f.Imports {
+		if s.Path.Value == targetIm {
+			tl = extractTypes(f.Decls)
+		}
+	}
+
+	wrap := []TypeSpec{}
+	for _, t := range tl {
+		switch t.Type.(type) {
+		case *ast.StructType:
+			if objectMetaEmbedFilter(t.Type, "ObjectMeta") {
+				wrap = append(wrap, TypeSpec{ Name: t.Name.Name, Pkg: f.Name.Name})
+			}
+		}
+	}
+	return wrap, nil
+}
+
+func templatePkg(pkg string, wrapables []TypeSpec) {
+	fm := template.FuncMap{
+		"ToLower": strings.ToLower,
+	}
+
+	//TODO: figurre out a way to embed the templates, I suppose const strings works
+	tFile, err := ioutil.ReadFile("./templates/object_wrapper.tmpl")
+	if err != nil {
+		panic(err)
+	}
+
+	temp, err := template.New("thing").Funcs(fm).Parse(string(tFile))
+	if err != nil {
+		panic(err)
+	}
+
+	path := fmt.Sprintf(".%s%s%s",string(os.PathSeparator), pkg, string(os.PathSeparator))
+	err = os.MkdirAll(path, 0755)
+	if err != nil {
+		panic(err)
+	}
+	oFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_types.go", path), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer oFile.Close()
+
+	err = temp.Execute(oFile, wrapables)
+}
