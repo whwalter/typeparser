@@ -7,34 +7,18 @@ import (
 	"go/ast"
 	"io/ioutil"
 	"os"
+	"strings"
+	"text/template"
 )
 
 func main() {
+
 	fset := token.NewFileSet() // positions are relative to fset
-	src := `package foo
 
-import (
-	"fmt"
-	"time"
-)
-
-type bar struct {
-	A string
-}
-type foo struct {
-	bar
-	t int
-}
-func bbar() {
-	fmt.Println(time.Now())
-}`
-
-	src = src
 	file, err := ioutil.ReadFile(os.Args[2])
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(string(file))
 	// Parse src but stop after processing the imports.
 	f, err := parser.ParseFile(fset, "", string(file), parser.DeclarationErrors)
 
@@ -43,47 +27,57 @@ func bbar() {
 		return
 	}
 
-	fl := Filer{
-		Pkgs: map[string]Thinger{},
-	}
 
 	tl := []*ast.TypeSpec{}
 	for _, s := range f.Imports {
 		if s.Path.Value == targetIm {
-			t := Thinger{}
-			if s.Name != nil {
-				t.ImportName = s.Name.Name
-			}
-			t.Types = f.Decls
 			tl = extractTypes(f.Decls)
-			fl.Pkgs[f.Name.Name] = t
 		}
 	}
 
 	wrappables := map[string]ast.Node{}
+	wrap := []w{}
 	for _, t := range tl {
 		switch t.Type.(type) {
 		case *ast.StructType:
 			fmt.Printf("Struct: %s\n", t.Name.Name)
 			if objectMetaEmbedFilter(t.Type, "ObjectMeta") {
 				wrappables[t.Name.Name] = t.Type
+				wrap = append(wrap, w{ Name: t.Name.Name, Pkg: f.Name.Name})
 			}
 		}
 	}
 
+	fm := template.FuncMap{
+		"ToLower": strings.ToLower,
+	}
+	tFile, err := ioutil.ReadFile("./templates/object_wrapper.tmpl")
+	if err != nil {
+		panic(err)
+	}
+
+	temp, err := template.New("thing").Funcs(fm).Parse(string(tFile))
+	if err != nil {
+		panic(err)
+	}
+
+	oFile, err := os.OpenFile("./output.go", os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer oFile.Close()
+
+	err = temp.Execute(oFile, wrap)
 	for k := range wrappables {
 		fmt.Printf("Templateable Type %s\n", k)
+
 	}
-/*
-	for _, types := range fl.Pkgs {
-		for _, t := range types.Types {
-			//wrappable, err := ast.Inspect(t, runtimeObjectFilter)
-//			ast.Inspect(t, runtimeObjectFilter)
-		}
-	}
-	*/
 }
 
+type w struct {
+	Name string
+	Pkg string
+}
 func extractTypes(decls []ast.Decl) []*ast.TypeSpec {
 	tl := []*ast.TypeSpec{}
 	for _, decl := range decls {
@@ -128,13 +122,6 @@ func objectMetaEmbedFilter(n ast.Node, embedName string) bool {
 	}
 	return false
 }
-type Filer struct {
-	Pkgs map[string]Thinger
-}
 
-type Thinger struct {
-	ImportName string
-	Types []ast.Decl
-}
 const targetIm = "\"k8s.io/apimachinery/pkg/apis/meta/v1\""
 const targetImport = "\"fmt\""
