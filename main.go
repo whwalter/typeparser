@@ -127,7 +127,7 @@ func parseFile(input string) ([]TypeSpec, error) {
 	for _, t := range tl {
 		switch t.Type.(type) {
 		case *ast.StructType:
-			if objectMetaEmbedFilter(t.Type, "ObjectMeta") {
+			if objectMetaEmbedFilter(t.Type, "ObjectMeta") && objectMetaEmbedFilter(t.Type, "TypeMeta"){
 				wrap = append(wrap, TypeSpec{ Name: t.Name.Name, Pkg: f.Name.Name})
 			}
 		}
