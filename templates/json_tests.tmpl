@@ -1,0 +1,22 @@
+{{- range . -}}
+{{- $shortname := slice .Name 0 2 | ToLower -}}
+func Test{{ .Name }}MarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	k := "{{ .Name }}"
+	{{$shortname}} := New{{ .Name }}("test")
+
+	// assert json marshaling
+	data, err := json.Marshal({{$shortname}})
+	assert.NoError(t, err)
+
+	// assert object TypeMeta is unchanged
+	assert.Empty(t, {{$shortname}}.TypeMeta.Kind)
+
+	// assert json data has type metadata
+	var m map[string]interface{}
+	assert.NoError(t, json.Unmarshal(data, &m))
+	assert.Equal(t, m["kind"], k)
+}
+
+{{ end -}}

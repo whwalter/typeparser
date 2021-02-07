@@ -1,0 +1,8 @@
+{{- range . }}
+{{ $shortname := slice .Name 0 2 | ToLower }}
+func ({{$shortname}} {{ .Name }}) MarshalJSON() ([]byte, error) {
+	{{$shortname}}.{{ .Name }}.TypeMeta = metav1.TypeMeta{Kind: "{{ .Name }}", APIVersion: {{ .Pkg }}.SchemeGroupVersion.String()}
+	return json.Marshal({{$shortname}}.{{ .Name }})
+}
+
+{{ end -}}

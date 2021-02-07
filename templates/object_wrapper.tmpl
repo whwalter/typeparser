@@ -1,6 +1,5 @@
-{{- range . }}
-{{ $shortname := slice .Name 0 2 | ToLower }}
-
+{{- range . -}}
+{{- $shortname := slice .Name 0 2 | ToLower -}}
 type {{.Name}} struct {
 	{{.Pkg}}.{{.Name}}
 }
@@ -11,6 +10,11 @@ func New{{.Name}}(name string) *{{.Name}} {
 	return {{$shortname}}
 }
 
+func ({{$shortname}} *{{.Name}}) WithNamespace(namespace string) *{{.Name}} {
+	{{$shortname}}.ObjectMeta.Namespace = namespace
+	return {{$shortname}}
+}
+
 func ({{$shortname}} *{{.Name}}) WithLabels(labels map[string]string) *{{.Name}} {
 	if {{$shortname}}.ObjectMeta.Labels == nil {
 		{{$shortname}}.ObjectMeta.Labels = map[string]string{}
@@ -18,6 +22,7 @@ func ({{$shortname}} *{{.Name}}) WithLabels(labels map[string]string) *{{.Name}}
 	for k,v := range labels {
 		{{$shortname}}.ObjectMeta.Labels[k] = v
 	}
+	return {{$shortname}}
 }
 
 func ({{$shortname}} *{{.Name}}) WithAnnotations(annotations map[string]string) *{{.Name}} {
@@ -27,5 +32,6 @@ func ({{$shortname}} *{{.Name}}) WithAnnotations(annotations map[string]string) 
 	for k,v := range annotations {
 		{{$shortname}}.ObjectMeta.Annotations[k] = v
 	}
+	return {{$shortname}}
 }
 {{ end -}}

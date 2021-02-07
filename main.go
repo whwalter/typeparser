@@ -136,8 +136,44 @@ func parseFile(input string) ([]TypeSpec, error) {
 }
 
 func templatePkg(pkg string, wrapables []TypeSpec) {
+	path := fmt.Sprintf(".%s%s%s",string(os.PathSeparator), pkg, string(os.PathSeparator))
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		panic(err)
+	}
+
+	oFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_types.go", path), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer oFile.Close()
+
+	testOutFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_types_test.go", path), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer testOutFile.Close()
+
+	jsonOutFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_json.go", path), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer jsonOutFile.Close()
+
+	jsonTestOutFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_json_test.go", path), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		panic(err)
+	}
+	defer jsonTestOutFile.Close()
+
 	fm := template.FuncMap{
 		"ToLower": strings.ToLower,
+	}
+
+	// Load all my templaes
+	headerFile, err := ioutil.ReadFile("./templates/header.tmpl")
+	if err != nil {
+		panic(err)
 	}
 
 	//TODO: figurre out a way to embed the templates, I suppose const strings works
@@ -146,21 +182,118 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 		panic(err)
 	}
 
-	temp, err := template.New("thing").Funcs(fm).Parse(string(tFile))
+	//TODO: figurre out a way to embed the templates, I suppose const strings works
+	testHeadFile, err := ioutil.ReadFile("./templates/tests_header.tmpl")
 	if err != nil {
 		panic(err)
 	}
 
-	path := fmt.Sprintf(".%s%s%s",string(os.PathSeparator), pkg, string(os.PathSeparator))
-	err = os.MkdirAll(path, 0755)
+	//TODO: figurre out a way to embed the templates, I suppose const strings works
+	testFile, err := ioutil.ReadFile("./templates/test_types.tmpl")
 	if err != nil {
 		panic(err)
 	}
-	oFile, err := os.OpenFile(fmt.Sprintf("%szz_generated_types.go", path), os.O_RDWR|os.O_CREATE, 0755)
+
+	jsonHeaderFile, err := ioutil.ReadFile("./templates/json_header.tmpl")
 	if err != nil {
 		panic(err)
 	}
-	defer oFile.Close()
+
+	jsonFile, err := ioutil.ReadFile("./templates/json.tmpl")
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTestHeadFile, err := ioutil.ReadFile("./templates/json_test_header.tmpl")
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTestFile, err := ioutil.ReadFile("./templates/json_tests.tmpl")
+	if err != nil {
+		panic(err)
+	}
+
+	temp, err := template.New("thing").Funcs(fm).Parse(string(headerFile))
+	if err != nil {
+		panic(err)
+	}
+
+	testTemp, err := template.New("thing").Funcs(fm).Parse(string(testHeadFile))
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTemp, err := template.New("thing").Funcs(fm).Parse(string(jsonHeaderFile))
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTestTemp, err := template.New("thing").Funcs(fm).Parse(string(jsonTestHeadFile))
+	if err != nil {
+		panic(err)
+	}
+
+	pSpec := TypeSpec{
+		Name: "v1",
+		Pkg: pkg,
+	}
+
+	err = temp.Execute(oFile, pSpec)
+	if err != nil {
+		panic(err)
+	}
+
+	err = testTemp.Execute(testOutFile, pSpec)
+	if err != nil {
+		panic(err)
+	}
+
+	err = jsonTemp.Execute(jsonOutFile, pSpec)
+	if err != nil {
+		panic(err)
+	}
+
+	err = jsonTestTemp.Execute(jsonTestOutFile, pSpec)
+	if err != nil {
+		panic(err)
+	}
+
+	temp, err = template.New("thing").Funcs(fm).Parse(string(tFile))
+	if err != nil {
+		panic(err)
+	}
 
 	err = temp.Execute(oFile, wrapables)
+	if err != nil {
+		panic(err)
+	}
+
+	testTemp, err = template.New("thing").Funcs(fm).Parse(string(testFile))
+	if err != nil {
+		panic(err)
+	}
+
+	err = testTemp.Execute(testOutFile, wrapables)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTemp, err = template.New("thing").Funcs(fm).Parse(string(jsonFile))
+	if err != nil {
+		panic(err)
+	}
+	err = jsonTemp.Execute(jsonOutFile, wrapables)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTestTemp, err = template.New("thing").Funcs(fm).Parse(string(jsonTestFile))
+	if err != nil {
+		panic(err)
+	}
+	err = jsonTestTemp.Execute(jsonTestOutFile, wrapables)
+	if err != nil {
+		panic(err)
+	}
 }

@@ -1,0 +1,17 @@
+{{- range .}}
+{{ $shortname := slice .Name 0 2 | ToLower }}
+
+func Test{{.Name}}(t *testing.T) {
+	{{$shortname}} := New{{.Name}}("test").
+		WithNamespace("test-ns").
+		WithLabels(map[string]string{"label":"test"}).
+		WithAnnotations(map[string]string{"note":"test"})
+
+	assert.Equal(t, {{$shortname}}.ObjectMeta.Name, "test")
+	assert.Equal(t, {{$shortname}}.ObjectMeta.Namespace, "test-ns")
+	assert.Equal(t, {{$shortname}}.ObjectMeta.Labels["label"], "test")
+	assert.Equal(t, {{$shortname}}.ObjectMeta.Annotations["note"], "test")
+
+}
+
+{{ end -}}
