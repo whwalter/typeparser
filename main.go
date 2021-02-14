@@ -13,34 +13,38 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const objectMetaImport = "\"k8s.io/apimachinery/pkg/apis/meta/v1\""
+
 func main() {
 
 	// get the list of input packages
 	pkgInfo := parseInput(os.Args[2:]...)
 
 
-	templateMap := map[string][]TypeSpec{}
+	templateMap := map[string][]TypeInfo{}
 	//Parse the source files for each package
 	for _, pkg := range pkgInfo {
-		wrapables, err := parsePkg(pkg)
+		runtimeObjects, err := parsePkg(pkg)
 		if err != nil {
 			panic(err)
 		}
 
-		templateMap[pkg.ImportPath] = wrapables
+		templateMap[pkg.ImportPath] = runtimeObjects
 	}
 	for pkg, ts := range templateMap {
 
-		fmt.Printf("Package: %s\nTemplated types: %s\n", pkg, ts)
+		log.Info(fmt.Sprintf("Package: %s\nTemplated types: %s\n", pkg, ts))
 		templatePkg(pkg, ts)
 	}
 
 }
 
-type TypeSpec struct {
+type TypeInfo struct {
 	Name string
 	Pkg string
 }
+
+// returns all the type declarations in the source file being parsed
 func extractTypes(decls []ast.Decl) []*ast.TypeSpec {
 	tl := []*ast.TypeSpec{}
 	for _, decl := range decls {
@@ -57,24 +61,31 @@ func extractTypes(decls []ast.Decl) []*ast.TypeSpec {
 	return tl
 }
 
-func objectMetaEmbedFilter(n ast.Node, embedName string) bool {
+func embedFilter(n ast.Node, embedNames ...string) bool {
+	embeds := map[string]bool{}
 	for _, field := range n.(*ast.StructType).Fields.List {
-		var name string
-		switch field.Type.(type) {
-		case *ast.SelectorExpr:
-			name = field.Type.(*ast.SelectorExpr).Sel.Name
-		case *ast.Ident:
-			name = field.Type.(*ast.Ident).Name
-		}
-		if name == embedName{
-			return true
+		for _, embed := range embedNames {
+			var name string
+			switch field.Type.(type) {
+			case *ast.SelectorExpr:
+				name = field.Type.(*ast.SelectorExpr).Sel.Name
+			case *ast.Ident:
+				name = field.Type.(*ast.Ident).Name
+			}
+			if name == embed{
+				embeds[embed] = true
+			}
 		}
 	}
-	return false
-}
 
-const targetIm = "\"k8s.io/apimachinery/pkg/apis/meta/v1\""
-const targetImport = "\"fmt\""
+	for _, embed := range embedNames {
+		if !embeds[embed] {
+			return false
+		}
+
+	}
+	return true
+}
 
 func parseInput(inputs ...string) map[string]*build.Package {
 	ctx := build.Default
@@ -89,20 +100,20 @@ func parseInput(inputs ...string) map[string]*build.Package {
 	return importPaths
 }
 
-func parsePkg(input *build.Package) ([]TypeSpec, error) {
+func parsePkg(input *build.Package) ([]TypeInfo, error) {
 
-	wrapables := []TypeSpec{}
+	runtimeObjects := []TypeInfo{}
 	for _, source := range input.GoFiles {
 		wraps, err := parseFile(fmt.Sprintf("%s%s%s", input.Dir, string(os.PathSeparator), source))
 		if err != nil {
 			return nil, err
 		}
-		wrapables = append(wrapables, wraps...)
+		runtimeObjects = append(runtimeObjects, wraps...)
 	}
-	return wrapables, nil
+	return runtimeObjects, nil
 }
 
-func parseFile(input string) ([]TypeSpec, error) {
+func parseFile(input string) ([]TypeInfo, error) {
 
 	fset := token.NewFileSet() // positions are relative to fset
 	file, err := ioutil.ReadFile(input)
@@ -116,26 +127,26 @@ func parseFile(input string) ([]TypeSpec, error) {
 	}
 
 
-	tl := []*ast.TypeSpec{}
+	types := []*ast.TypeSpec{}
 	for _, s := range f.Imports {
-		if s.Path.Value == targetIm {
-			tl = extractTypes(f.Decls)
+		if s.Path.Value == objectMetaImport {
+			types = extractTypes(f.Decls)
 		}
 	}
 
-	wrap := []TypeSpec{}
-	for _, t := range tl {
+	runtimeObjects := []TypeInfo{}
+	for _, t := range types {
 		switch t.Type.(type) {
 		case *ast.StructType:
-			if objectMetaEmbedFilter(t.Type, "ObjectMeta") && objectMetaEmbedFilter(t.Type, "TypeMeta"){
-				wrap = append(wrap, TypeSpec{ Name: t.Name.Name, Pkg: f.Name.Name})
+			if embedFilter(t.Type, "ObjectMeta", "TypeMeta"){
+				runtimeObjects = append(runtimeObjects, TypeInfo{ Name: t.Name.Name, Pkg: f.Name.Name})
 			}
 		}
 	}
-	return wrap, nil
+	return runtimeObjects, nil
 }
 
-func templatePkg(pkg string, wrapables []TypeSpec) {
+func templatePkg(pkg string, objects []TypeInfo) {
 	path := fmt.Sprintf(".%s%s%s",string(os.PathSeparator), pkg, string(os.PathSeparator))
 	err := os.MkdirAll(path, 0755)
 	if err != nil {
@@ -234,8 +245,13 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 		panic(err)
 	}
 
-	pSpec := TypeSpec{
-		Name: "v1",
+
+	//Presume the api is versioned since it is part of the spec.
+	//Grab the final string token in the split import path as the version.
+	pkgTokens := strings.Split(pkg, "/")
+	shortName := pkgTokens[len(pkgTokens)-1]
+	pSpec := TypeInfo{
+		Name: shortName,
 		Pkg: pkg,
 	}
 
@@ -264,7 +280,7 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 		panic(err)
 	}
 
-	err = temp.Execute(oFile, wrapables)
+	err = temp.Execute(oFile, objects)
 	if err != nil {
 		panic(err)
 	}
@@ -274,7 +290,7 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 		panic(err)
 	}
 
-	err = testTemp.Execute(testOutFile, wrapables)
+	err = testTemp.Execute(testOutFile, objects)
 	if err != nil {
 		panic(err)
 	}
@@ -283,7 +299,7 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 	if err != nil {
 		panic(err)
 	}
-	err = jsonTemp.Execute(jsonOutFile, wrapables)
+	err = jsonTemp.Execute(jsonOutFile, objects)
 	if err != nil {
 		panic(err)
 	}
@@ -292,7 +308,7 @@ func templatePkg(pkg string, wrapables []TypeSpec) {
 	if err != nil {
 		panic(err)
 	}
-	err = jsonTestTemp.Execute(jsonTestOutFile, wrapables)
+	err = jsonTestTemp.Execute(jsonTestOutFile, objects)
 	if err != nil {
 		panic(err)
 	}
